@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>California Wildfire Map</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://code.highcharts.com/css/highcharts.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://code.highcharts.com/maps/highmaps.js"></script>
+    <script src="https://code.highcharts.com/maps/modules/data.js"></script>
+    <script src="https://code.highcharts.com/maps/modules/exporting.js"></script>
+    <script src="https://code.highcharts.com/maps/modules/offline-exporting.js"></script>
+    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <script src="https://code.highcharts.com/maps/modules/map.js"></script>
+    <style>
+        #container, #table_div {
+            min-height: 90vh; /* Adjust as needed */
+
+        }
+
+        fireDetailsTable {
+            min-height: 100%;
+        }
+        .container-full {
+            min-height: 100vh;
+            margin: 20px;
+        }
+
+        .highcharts-background {
+            fill: #6c747d !important;
+        }
+        /* Default map styles */
+        .highcharts-map-series path {
+            fill: rgba(4, 111, 70, 0.65) !important; /* Bright yellow on hover */
+            stroke: black !important; /* White borders */
+            opacity: 1 !important; /* Force no opacity */
+        }
+
+        /* Hover styles for the entire map */
+        .highcharts-map-series:hover path {
+            fill: rgba(4, 111, 70, 0.25) !important; /* Bright yellow on hover */
+            stroke: black !important; /* Bright red borders on hover */
+            opacity: 1 !important; /* Force full opacity */
+        }
+
+        /* SVG root hover override */
+        .highcharts-root:hover .highcharts-series {
+            opacity: 1 !important; /* Override Highcharts global hover opacity */
+        }
+
+        :root {
+            --highcharts-background-color: rgba(255, 255, 255, 0.9); /* Light background */
+            --highcharts-neutral-color-100: #333; /* Dark text */
+        }
+        .highcharts-legend-item text {
+            text-decoration: none !important; /* Force removal of strikethrough */
+        }
+        .highcharts-graph, .highcharts-credits {
+            display: none;
+        }
+
+        .card {
+            min-height: 95vh;
+        }
+
+        #fireDetailsTable {
+            th:nth-child(1), td:nth-child(1) {
+                width: 300px
+            }
+        }
+
+
+    </style>
+</head>
+<body>
+<div class="container-full mt-4">
+    <div class="row">
+        <div class="col-md-6">
+            <div id="table_div">
+
+                <div class="card p-3 bg-secondary text-white">
+                    <h4>Fuck You GPT</h4>
+                    <hr>
+                    <div class="row mb-3" style="height: 10%;">
+                        <div class="col-6">
+                            <input type="text" id="searchInput" class="form-control" placeholder="Search">
+                        </div>
+                        <div class="col-6">
+                            <select id="yearSelect" class="form-select"></select>
+                        </div>
+                    </div>
+                    <div class="mb-3" style="height: 60%; overflow-y: scroll;">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-info mt-3" id="fireDetailsTable">
+                                <thead class="table-light">
+                                <tr>
+                                    <th>Fire</th>
+                                    <th>Date</th>
+                                    <th>Acres</th>
+                                    <th>Cause</th>
+                                    <th>Damaged</th>
+                                    <th>Destroyed</th>
+                                    <th>Injuries</th>
+                                    <th>Fatalities</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <!-- Rows will be dynamically added here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card p-3 bg-secondary text-white ">
+                <div id="container"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+
+    // Load mapData from the JSON file
+    let mapData = [];
+
+    // Fetch the JSON data and run the dependent logic only after the fetch completes
+    fetch('/data/ca_fires.json')
+        .then(response => response.json())
+        .then(data => {
+            mapData = data || [];
+            console.log('mapData loaded:', mapData);
+
+            // Now run the dependent code
+            initializeApp();
+        })
+        .catch(error => console.error('Error loading mapData:', error));
+
+    function initializeApp() {
+
+        // Group data by year (ensuring year is a string)
+        var groupedData = {};
+        mapData.forEach(function (item) {
+            var year = String(item.year);
+            if (!groupedData[year]) {
+                groupedData[year] = [];
+            }
+            groupedData[year].push(item);
+        });
+
+        // Populate the year dropdown
+        var $yearSelect = $('#yearSelect');
+        $.each(Object.keys(groupedData).sort(), function (_, year) {
+            $yearSelect.append($('<option></option>').val(year).text(year));
+        });
+
+        // Function to calculate zMin and zMax for the entire dataset
+        function calculateGlobalZValues(mapData) {
+            const zValues = mapData.map(item => parseFloat(item.incident_acres_burned || 0)).filter(value => value > 0);
+            const zMin = zValues.length ? Math.min(...zValues) : 0; // Default to 0 if no valid values
+            const zMax = zValues.length ? Math.max(...zValues) : 1; // Default to 1 to avoid flat scaling
+            return { zMin, zMax };
+        }
+
+        // Function to generate 30 color zones with adjusted scaling
+        function getZones(zMin, zMax) {
+            const numberOfZones = 30; // Total number of colors
+            const colors = [
+                '#FFFF00', '#FFE600', '#FFCC00', '#FFB300', '#FF9900', '#FF8000', '#FF6600',
+                '#FF4D00', '#FF3300', '#FF1A00', '#FF0000', '#E60000', '#CC0000', '#B30000',
+                '#990000', '#800000', '#730000', '#660000', '#590000', '#4D0000', '#400000',
+                '#330000', '#260000', '#1A0000', '#0D0000', '#900C3F', '#A01345', '#B01A4B',
+                '#C02151', '#D02957'
+            ];
+
+            const zones = [];
+            for (let i = 0; i < numberOfZones; i++) {
+                const scaledValue = zMin + (i / numberOfZones) * (zMax - zMin); // Linear scaling
+                zones.push({
+                    value: scaledValue,
+                    color: colors[i]
+                });
+            }
+
+            // Ensure the last zone covers zMax and above
+            zones.push({
+                value: zMax + 1, // Include all values above zMax
+                color: colors[colors.length - 1]
+            });
+
+            return zones;
+        }
+
+        // Function to reapply zone-based colors
+        function applyZoneColors() {
+            chart.series[1].points.forEach(point => {
+                if (point.graphic) {
+                    point.graphic.css({
+                        fill: point.color, // Apply zone-based color
+                        stroke: point.color
+                    });
+                }
+            });
+        }
+        function updateTable(data) {
+            console.log("updateTable was called.");
+            const $fireDetailsTable = $('#fireDetailsTable');
+
+            // Check if DataTable is already initialized
+            let dataTable;
+            if ($.fn.DataTable.isDataTable('#fireDetailsTable')) {
+                dataTable = $fireDetailsTable.DataTable();
+            } else {
+                // Initialize DataTable if not already initialized
+                dataTable = $fireDetailsTable.DataTable({
+                    paging: true,
+                    searching: false,
+                    info: false,
+                    pageLength: 20,
+                    lengthChange: false,
+                    order: [[0, 'asc']],
+                    columns: [
+                        { title: "Fire", data: "incident_name" },
+                        { title: "Date", data: "incident_dateonly_created" },
+                        { title: "Acres", data: "incident_acres_burned" },
+                        { title: "Cause", data: "cause" },
+                        { title: "Damaged", data: "structures_damaged" },
+                        { title: "Destroyed", data: "structures_destroyed" },
+                        { title: "Injuries", data: "injuries" },
+                        { title: "Fatalities", data: "fatalities" },
+                    ],
+                });
+            }
+
+            // Clear existing rows in DataTable
+            dataTable.clear();
+
+            // Add new rows with correct format
+            data.forEach(item => {
+                const details = item.details || {};
+                dataTable.row.add({
+                    incident_name: details.incident_name || 'N/A',
+                    incident_dateonly_created: details.incident_dateonly_created || 'N/A',
+                    incident_acres_burned: details.incident_acres_burned || 0,
+                    cause: details.cause || 'Unknown',
+                    structures_damaged: details.structures_damaged || 'N/A',
+                    structures_destroyed: details.structures_destroyed || 'N/A',
+                    injuries: details.injuries || 'N/A',
+                    fatalities: details.fatalities || 'N/A',
+                });
+            });
+
+            // Redraw the table
+            dataTable.draw();
+
+            // Add hover event handlers to synchronize table rows and map bubbles
+            $('#fireDetailsTable tbody').on('mouseenter', 'tr', function () {
+                const rowData = dataTable.row(this).data(); // Get data for the hovered row
+                if (rowData) {
+                    highlightBubbleWithTooltip(rowData.incident_name); // Highlight the corresponding bubble and show tooltip
+                }
+            });
+
+            $('#fireDetailsTable tbody').on('mouseleave', 'tr', function () {
+                unhighlightBubbles(); // Remove highlight from all bubbles
+            });
+        }
+
+// Function to highlight the map bubble and show tooltip corresponding to the fire name
+        // Function to highlight the map bubble and show tooltip corresponding to the fire name
+        function highlightBubbleWithTooltip(fireName) {
+            if (!chart || !chart.series[1]) return;
+
+            chart.series[1].points.forEach(point => {
+                if (point.name === fireName) {
+                    point.setState('hover'); // Highlight the bubble
+                    chart.tooltip.refresh(point); // Programmatically show the tooltip for the bubble
+                } else {
+                    point.setState(''); // Reset other bubbles
+                }
+            });
+        }
+
+
+// Function to remove highlights and hide tooltips from all bubbles
+        function unhighlightBubbles() {
+            if (!chart || !chart.series[1]) return;
+
+            chart.series[1].points.forEach(point => {
+                point.setState(''); // Reset all bubbles
+            });
+
+            // Hide tooltip
+            chart.tooltip.hide();
+        }
+
+
+        let chart;
+
+        // Function to update chart and table data
+        function updateChart(year, searchQuery = '') {
+            let data;
+
+            if (searchQuery) {
+                data = mapData.filter(item =>
+                    item.incident_name?.toLowerCase().includes(searchQuery.toLowerCase())
+                ).map(item => ({
+                    name: item.incident_name,
+                    lat: parseFloat(item.incident_latitude),
+                    lon: parseFloat(item.incident_longitude),
+                    z: parseFloat(item.incident_acres_burned || 0),
+                    details: item
+                }));
+            } else if (year) {
+                data = (groupedData[year] || []).map(item => ({
+                    name: item.incident_name,
+                    lat: parseFloat(item.incident_latitude),
+                    lon: parseFloat(item.incident_longitude),
+                    z: parseFloat(item.incident_acres_burned || 0),
+                    details: item
+                }));
+            } else {
+                data = mapData.map(item => ({
+                    name: item.incident_name,
+                    lat: parseFloat(item.incident_latitude),
+                    lon: parseFloat(item.incident_longitude),
+                    z: parseFloat(item.incident_acres_burned || 0),
+                    details: item
+                }));
+            }
+
+            console.log('Filtered Data for Chart and Table:', data);
+
+            // Update the chart with the filtered data
+            const { zMin, zMax } = calculateGlobalZValues(mapData);
+            chart.series[1].update({
+                zones: getZones(zMin, zMax)
+            });
+
+            chart.series[1].setData(data);
+
+            // Update the table with the current data
+            updateTable(data);
+        }
+
+
+        // Initialize the Highcharts map with TopoJSON
+        Highcharts.getJSON(
+            'https://code.highcharts.com/mapdata/countries/us/us-ca-all.topo.json', // TopoJSON file for California
+            function (topojson) {
+                const { zMin, zMax } = calculateGlobalZValues(mapData); // Calculate global zMin and zMax
+
+                chart = Highcharts.mapChart('container', {
+                    chart: {
+                        map: topojson,
+                        styledMode: false // Ensure styled mode is disabled
+                    },
+                    title: {
+                        text: 'California Wildfire Map'
+                    },
+                    mapNavigation: {
+                        enabled: true
+                    },
+                    legend: {
+                        enabled: false,
+                    },
+                    plotOptions: {
+                        series: {
+                            states: {
+                                hover: {
+                                    enabled: true, // Enable hover behavior
+                                    opacity: 1 // Disable hover opacity changes
+                                }
+                            }
+                        }
+                    },
+                    series: [
+                        {
+                            type: 'map',
+                            name: 'California Map',
+                            states: {
+                                hover: {
+                                    color: '#ffff00', // Bright yellow on hover
+                                    borderColor: '#ff0000', // Bright red border on hover
+                                    borderWidth: 2 // Thicker border width on hover
+                                }
+                            }
+                        },
+                        {
+                            type: 'mapbubble',
+                            name: 'Wildfires',
+                            color: 'red',
+                            joinBy: null,
+                            zMin: zMin,
+                            zMax: zMax,
+                            data: [], // Data will be populated dynamically
+                            sizeBy: 'diameter',
+                            minSize: 4,
+                            maxSize: 50,
+                            tooltip: {
+                                useHTML: true,
+                                pointFormatter: function () {
+                                    const details = this.details;
+                                    return `
+                                        <strong>${details.incident_name} (${details.year})</strong><br>
+                                        Date Ignited: ${details.incident_dateonly_created}<br>
+                                        Acres Burned: ${details.incident_acres_burned}<br>
+                                        County: ${details.incident_county}<br>
+                                        Location: ${details.incident_location}<br>
+                                        <a href="${details.incident_url}" target="_blank">More Details</a>`;
+                                }
+                            },
+                            zones: getZones(zMin, zMax) // Zone-based coloring
+                        }
+                    ]
+                });
+
+                function setDataTable() {
+
+                    // Destroy DataTable if already initialized
+                    if ($.fn.DataTable.isDataTable('#fireDetailsTable')) {
+                        console.log("Destroying existing DataTable.");
+                        $('#fireDetailsTable').DataTable().destroy();
+
+                    }
+
+                    $('#fireDetailsTable').DataTable({
+                        paging: true, // Enable pagination
+                        searching: false, // Disable searching
+                        info: false, // Disable info display
+                        order: [[0, 'asc']] // Sort by the first column (Fire Name)
+                    });
+
+                }
+                const firstYear = Object.keys(groupedData)[0];
+                if (firstYear) {
+                    $yearSelect.val(firstYear);
+                    updateChart(firstYear);
+                    //setDataTable();
+                }
+
+                $yearSelect.on('change', function () {
+                    const selectedYear = $yearSelect.val();
+                    console.log('Dropdown changed, year:', selectedYear);
+                    updateChart(selectedYear, $('#searchInput').val());
+                    //setDataTable();
+
+                });
+
+                $('#searchInput').on('input', function () {
+                    const searchQuery = $(this).val();
+                    console.log('Search input changed:', searchQuery);
+                    updateChart($yearSelect.val(), searchQuery);
+                    //setDataTable();
+
+                });
+            }
+        );
+
+    }
+
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+</body>
+</html>
