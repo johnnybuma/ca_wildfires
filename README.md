@@ -18,8 +18,17 @@ Follow these steps to set up and run the application locally:
 
 ### **1. Clone the Repository**
 ```bash
-git clone https://github.com/your-username/california-wildfire-map.git
-cd california-wildfire-map
+#Clone Project Files
+git clone https://github.com/johnnybuma/ca_wildfires.git
+
+#Enter Project Directory
+cd ca_wildfires
+
+#Install Dependencies
+npm install
+
+#Start Node Webserver
+node server.js
 ```
 
 ### **2. Install Dependencies**
